@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package>
+  <name>arbotix_commander2</name>
+  <version>0.0.0</version>
+  <description>A driver for the Arbotix Caommander joystick from Vanadium Labs/Trossen Robotics.</description>
+
+  <maintainer email="kdh@es.aau.dk">Karl D. Hansen</maintainer>
+
+  <license>TODO</license>
+
+  <!-- <url type="website">http://wiki.ros.org/arbotix_commander2</url> -->
+
+  <author email="kdh@es.aau.dk">Karl D. Hansen</author>
+
+  <build_depend>roscpp</build_depend>
+  <run_depend>sensor_msgs</run_depend>
+  <buildtool_depend>catkin</buildtool_depend>
+
+</package>
