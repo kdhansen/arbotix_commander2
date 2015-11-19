@@ -11,10 +11,11 @@ class ArbotixCommander2
 	ros::Publisher _joy_pub;
 	boost::asio::io_service _ioservice;
 	boost::asio::serial_port _port;
+	unsigned int _sequence_num;
 
 public:
 	ArbotixCommander2(ros::Publisher joy_pub, std::string commander_serial_port, unsigned int baud_rate)
-		: _joy_pub(joy_pub), _port(_ioservice)
+		: _joy_pub(joy_pub), _port(_ioservice), _sequence_num(0)
 	{
 		boost::system::error_code ec;
 		_port.open(commander_serial_port, ec);
@@ -40,34 +41,108 @@ public:
 	void run()
 	{
 		unsigned char frame[8];
-		boost::system::error_code ec;
 		while(ros::ok())
 		{
-			// Fill the frame
-			boost::asio::read(_port, boost::asio::buffer(frame, 8), ec);
-			if (ec)
+			fill_frame(frame);
+			align_frame(frame);
+			while (! check_checksum(frame) )
 			{
-				throw std::runtime_error("Error getting serial data.");
+				progress_frame(frame);
+				align_frame(frame);
 			}
-			// Allign the header (0xff)
-			if (! (frame[0] == 0xff)) {
-				for (int i = 1; i < 8; ++i)
-				{
-					frame[i-1] = frame[i];
-				}
-				boost::asio::read(_port, boost::asio::buffer(&frame[8], 1), ec);
-				if (ec)
-				{
-					throw std::runtime_error("Error getting serial data.");
-				}
-			}
-			std::stringstream ss;
-			ss << (int)frame[0] << " " << (int)frame[1] << " " << (int)frame[2] << " " << (int)frame[3] << " " << (int)frame[4] << " " << (int)frame[5] << " " << (int)frame[6] << " " << (int)frame[7];
-			std::cout << ss.str() << std::endl;
+			sensor_msgs::Joy joy_msg = interpret_frame(frame);
+			joy_msg.header.seq = _sequence_num++;
+			_joy_pub.publish(joy_msg);
+		}
+	}
+
+private:
+
+	void print_frame(const unsigned char frame[])
+	{
+		std::stringstream ss;
+		for (int i = 0; i < 8; ++i)
+		{
+			ss << (unsigned int)frame[i] << " ";
+		}
+		std::cout << ss.str() << std::endl;
+	}
+
+	void fill_frame(unsigned char frame[])
+	{
+		boost::system::error_code ec;
+		boost::asio::read(_port, boost::asio::buffer(frame, 8), ec);
+		if (ec)
+		{
+			throw std::runtime_error("Error getting serial data.");
+		}
+	}
+
+	void align_frame(unsigned char frame[])
+	{
+		// First byte must be 0xff, next to last byte must be 0x00. Furthermore,
+		// the second byte cannot be 255, this happens when the checksum is 255,
+		// then the alignment may fix the checksum in the first position is no
+		// buttons are pressed.
+		while (frame[0] != 0xff || frame[1] == 0xff || frame[6] != 0x00)
+		{
+			progress_frame(frame);
+		}
+	}
+
+	void progress_frame(unsigned char frame[])
+	{
+		// Progress the buffer one entry,
+		for (int i = 1; i < 8; ++i)
+		{
+			frame[i-1] = frame[i];
+		}
+		// and fill a byte into the end.
+		boost::system::error_code ec;
+		size_t n;
+		n = boost::asio::read(_port, boost::asio::buffer(&frame[7], 1), ec);
+		if (ec)
+		{
+			throw std::runtime_error("Error getting serial data.");
+		}
+	}
+
+	bool check_checksum(const unsigned char frame[])
+	{
+		unsigned int sum = 0;
+		for (int i = 0; i < 8; ++i)
+		{
+			sum += frame[i];
+		}
+		if (sum%256 == 254)
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	sensor_msgs::Joy interpret_frame(unsigned char frame[])
+	{
+		sensor_msgs::Joy joy_msg;
+		joy_msg.axes.reserve(4);
+		for (int i = 1; i < 5; ++i)
+		{
+			double val = (frame[i] - 128.0) / 128.0;
+			joy_msg.axes.push_back(val);
 		}
 
+		joy_msg.buttons.reserve(8);
+		for (int i = 0; i < 8; ++i)
+		{
+			int val = (frame[5] >> i) & 0x01;
+			joy_msg.buttons.push_back(val);
+		}
+
+		return joy_msg;
 	}
-	
 };
 
 int main(int argc, char **argv)
